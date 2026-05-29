@@ -59,7 +59,7 @@ def print_to_file(*args, clear=False, logname='out.log', time0=None, **kwargs):
         os.unlink(logname)
 
     if time0 is not None:
-        prefix = "{:6.2f}s ".format((Time.now() - time0).sec)
+        prefix = "{:6.2f}s ".format((Time.now() - time0).sec) # 'Time' object has no attribute 'sec'
     else:
         prefix = None
 

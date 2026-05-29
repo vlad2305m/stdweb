@@ -20,6 +20,7 @@ from astropy.time import Time
 from stdpipe import astrometry, photometry, cutouts
 from stdpipe import templates, subtraction, plots, pipeline
 from stdpipe import resolve, utils, artefacts
+from stdweb.models import config_get
 
 from .constants import *
 from .utils import *
@@ -39,9 +40,9 @@ def subtract_image(filename, config, verbose=True, show=False):
         # Task-local
         _cachedir = os.path.join(basepath, 'cache')
 
-    sub_verbose = verbose if config.get('sub_verbose') else False
-    subtraction_mode = config.get('subtraction_mode', 'detection')
-    subtraction_method = config.get('subtraction_method', 'hotpants')
+    sub_verbose = verbose if config_get(config, 'sub_verbose') else False
+    subtraction_mode = config_get(config, 'subtraction_mode')
+    subtraction_method = config_get(config, 'subtraction_method')
 
     # Cleanup stale plots and files
     cleanup_paths(cleanup_subtraction, basepath=basepath)
@@ -72,11 +73,11 @@ def subtract_image(filename, config, verbose=True, show=False):
     pixscale = astrometry.get_pixscale(wcs=wcs)
 
     # Time
-    time = Time(config.get('time')) if config.get('time') else None
+    time = Time(config_get(config, 'time')) if config_get(config, 'time') else None
 
     log("\n---- Template selection ----\n")
 
-    tname = config.get('template', 'ps1')
+    tname = config_get(config, 'template')
     tconf = supported_templates.get(tname)
 
     if tname == 'custom':
@@ -89,8 +90,8 @@ def subtract_image(filename, config, verbose=True, show=False):
         custom_header = fits.getheader(os.path.join(basepath, 'custom_template.fits'), -1)
         custom_wcs = WCS(custom_header)
 
-        template_gain = config.get('custom_template_gain', 10000)
-        template_saturation = config.get('custom_template_saturation', None)
+        template_gain = config_get(config, 'custom_template_gain')
+        template_saturation = config_get(config, 'custom_template_saturation')
 
         custom_mask = np.isnan(custom_template)
         if template_saturation:
@@ -108,7 +109,7 @@ def subtract_image(filename, config, verbose=True, show=False):
             raise RuntimeError(f"Unsupported template: {tname}")
 
         tfilter = None
-        for _ in filter_mappings[config['filter']]:
+        for _ in filter_mappings[config_get(config, 'filter')]:
             if _ in tconf['filters']:
                 tfilter = _
                 break
@@ -117,18 +118,18 @@ def subtract_image(filename, config, verbose=True, show=False):
 
         log(f"Using {tconf['name']} in filter {tfilter} as a template")
 
-    sub_size = config.get('sub_size', 1000)
-    sub_overlap = config.get('sub_overlap', 50)
+    sub_size = config_get(config, 'sub_size')
+    sub_overlap = config_get(config, 'sub_overlap')
 
     classifier = None
 
     if subtraction_mode == 'detection':
         log('Transient detection mode activated')
         # Restrict the splitting if center and radius are provided
-        if config.get('filter_center') and config.get('filter_sr0'):
+        if config_get(config, 'filter_center') and config_get(config, 'filter_sr0'):
             # TODO: resolve the center only once
-            filter_center = resolve.resolve(config.get('filter_center'))
-            filter_sr0 = config.get('filter_sr0')
+            filter_center = resolve.resolve(config_get(config, 'filter_center'))
+            filter_sr0 = config_get(config, 'filter_sr0')
             x0,y0 = wcs.all_world2pix(filter_center.ra.deg, filter_center.dec.deg, 0)
             r0 = max(filter_sr0/pixscale, sub_size/2)
             x1,x2 = max(0, x0 - r0), min(x0 + r0, image.shape[1])
@@ -149,11 +150,11 @@ def subtract_image(filename, config, verbose=True, show=False):
             xmin=x1, xmax=x2, ymin=y1, ymax=y2
         )
 
-    elif config.get('target_ra') is not None:
+    elif config_get(config, 'target_ra') is not None:
         log('Forced photometry mode activated')
         # We will just crop the image
         nx, ny = 1, 1
-        x0,y0 = wcs.all_world2pix(config['target_ra'], config['target_dec'], 0)
+        x0,y0 = wcs.all_world2pix(config_get(config, 'target_ra'), config_get(config, 'target_dec'), 0)
         log(f"Will crop the sub-image centered at {x0:.1f} {y0:.1f}")
         def split_fn(image, *args, **kwargs):
             result = pipeline.get_subimage_centered(image, *args, x0=x0, y0=y0, width=sub_size, **kwargs)
@@ -241,7 +242,7 @@ def subtract_image(filename, config, verbose=True, show=False):
         tobj,tsegm = photometry.get_objects_sextractor(
             tmpl, mask=tmask, sn=5, gain=template_gain,
             extra={
-                'BACK_SIZE': config.get('bg_size', 256),
+                'BACK_SIZE': config_get(config, 'bg_size'),
                 # 'SATUR_LEVEL': template_saturation,
             },
             extra_params=['NUMBER', 'MAG_AUTO', 'ISOAREA_IMAGE', 'FLUX_MAX', 'FLUX_AUTO'],
@@ -263,8 +264,8 @@ def subtract_image(filename, config, verbose=True, show=False):
         fwhm_values = 2.0*tobj['FLUX_RADIUS'] # obj['fwhm']
         template_fwhm = np.median(fwhm_values[tidx])
 
-        if config.get('template_fwhm_override'):
-            template_fwhm = config.get('template_fwhm_override')
+        if config_get(config, 'template_fwhm_override'):
+            template_fwhm = config_get(config, 'template_fwhm_override')
 
         # Plot FWHM vs instrumental. TODO: make generic function for that?..
         with plots.figure_saver(os.path.join(basepath, 'sub_template_fwhm_mag.png'), figsize=(8, 6), show=show) as fig:
@@ -284,7 +285,7 @@ def subtract_image(filename, config, verbose=True, show=False):
         if subtraction_method == 'sfft':
             # SFFT
 
-            fwhm = config.get('fwhm', 3.0)
+            fwhm = config_get(config, 'fwhm')
 
             log(f"Using template FWHM = {template_fwhm:.1f} pix and image FWHM = {fwhm:.1f} pix")
 
@@ -298,12 +299,12 @@ def subtract_image(filename, config, verbose=True, show=False):
                 image1, tmpl,
                 mask=mask1,
                 template_mask=tmask,
-                image_gain=config.get('gain', 1.0),
+                image_gain=config_get(config, 'gain'),
                 template_gain=template_gain,
                 kernel_shape=kernel_shape,
-                kernel_poly_order=config.get('sfft_kernel_poly_order', 0),
-                bg_poly_order=config.get('sfft_bg_poly_order', 0),
-                flux_poly_order=config.get('sfft_flux_poly_order', 0),
+                kernel_poly_order=config_get(config, 'sfft_kernel_poly_order'),
+                bg_poly_order=config_get(config, 'sfft_bg_poly_order'),
+                flux_poly_order=config_get(config, 'sfft_flux_poly_order'),
                 err=True,
                 obj=obj1[obj1['flags']==0],
                 get_convolved=True,
@@ -331,7 +332,7 @@ def subtract_image(filename, config, verbose=True, show=False):
 
         else:
             # HOTPANTS
-            fwhm = config.get('fwhm', 3.0)
+            fwhm = config_get(config, 'fwhm')
 
             log(f"Using template FWHM = {template_fwhm:.1f} pix and image FWHM = {fwhm:.1f} pix")
 
@@ -341,13 +342,13 @@ def subtract_image(filename, config, verbose=True, show=False):
 
             bg = sep.Background(
                 image1.astype(np.double), mask=mask1,
-                bw=config.get('bg_size', 256),
-                bh=config.get('bg_size', 256),
+                bw=config_get(config, 'bg_size'),
+                bh=config_get(config, 'bg_size'),
             )
             tbg = sep.Background(
                 tmpl.astype(np.double), mask=tmask,
-                bw=config.get('bg_size', 256),
-                bh=config.get('bg_size', 256),
+                bw=config_get(config, 'bg_size'),
+                bh=config_get(config, 'bg_size'),
             )
 
             res = subtraction.run_hotpants(
@@ -361,10 +362,10 @@ def subtract_image(filename, config, verbose=True, show=False):
                 verbose=verbose,
                 image_fwhm=fwhm,
                 template_fwhm=template_fwhm,
-                image_gain=config.get('gain', 1.0),
+                image_gain=config_get(config, 'gain'),
                 template_gain=template_gain,
                 err=True,
-                extra=config.get('hotpants_extra', {'ko':0, 'bgo':0}),
+                extra=config_get(config, 'hotpants_extra'),
                 obj=obj1[obj1['flags']==0],
                 _exe=settings.STDPIPE_HOTPANTS
             )
@@ -391,16 +392,16 @@ def subtract_image(filename, config, verbose=True, show=False):
 
         # Post-subtraction steps
 
-        if config.get('rel_bg1') and config.get('rel_bg2'):
-            rel_bkgann = [config['rel_bg1'], config['rel_bg2']]
+        if config_get(config, 'rel_bg1') and config_get(config, 'rel_bg2'):
+            rel_bkgann = [config_get(config, 'rel_bg1'), config_get(config, 'rel_bg2')]
         else:
             rel_bkgann = None
 
-        if config.get('target_ra') is not None and config.get('target_dec') is not None and subtraction_mode == 'target':
+        if config_get(config, 'target_ra') is not None and config_get(config, 'target_dec') is not None and subtraction_mode == 'target':
             # Target forced photometry
             log(f"\n---- Target forced photometry ----\n")
 
-            target_obj = Table({'ra':[config['target_ra']], 'dec':[config['target_dec']]})
+            target_obj = Table({'ra':[config_get(config, 'target_ra')], 'dec':[config_get(config, 'target_dec')]})
             target_obj['x'],target_obj['y'] = wcs1.all_world2pix(target_obj['ra'], target_obj['dec'], 0)
 
             if not (target_obj['x'] > 0 and target_obj['x'] < image1.shape[1] and
@@ -414,22 +415,22 @@ def subtract_image(filename, config, verbose=True, show=False):
             target_obj = photometry.measure_objects(
                 target_obj, diff, mask=fullmask1,
                 # FWHM should match the one used for calibration
-                fwhm=config.get('fwhm'),
-                aper=config.get('rel_aper', 1.0),
+                fwhm=config_get(config, 'fwhm'),
+                aper=config_get(config, 'rel_aper'),
                 bkgann=rel_bkgann,
-                optimal=config.get('optimal_extraction', False),
+                optimal=config_get(config, 'optimal_extraction'),
                 sn=0,
                 # We assume no background
                 bg=None,
-                bg_size=config.get('bg_size', 256),
+                bg_size=config_get(config, 'bg_size'),
                 # ..and known error model
                 err=ediff,
-                gain=config.get('gain', 1.0),
-                centroid_iter=5 if config.get('centroid_targets') else 0,
+                gain=config_get(config, 'gain'),
+                centroid_iter=5 if config_get(config, 'centroid_targets') else 0,
                 verbose=sub_verbose
             )
 
-            if config.get('centroid_targets'):
+            if config_get(config, 'centroid_targets'):
                 # Centroiding might change target pixel positions - let's update sky positions too
                 target_obj['ra_orig'],target_obj['dec_orig'] = target_obj['ra'],target_obj['dec']
                 target_obj['ra'],target_obj['dec'] = wcs1.all_pix2world(target_obj['x'], target_obj['y'], 0)
@@ -462,7 +463,7 @@ def subtract_image(filename, config, verbose=True, show=False):
                 fluxerr = target_obj['bg_fluxerr']
             else:
                 fluxerr = target_obj['fluxerr']
-            target_obj['mag_limit'] = -2.5*np.log10(config.get('sn', 5)*fluxerr) + m['zero_fn'](
+            target_obj['mag_limit'] = -2.5*np.log10(config_get(config, 'sn')*fluxerr) + m['zero_fn'](
                 target_obj['x'],
                 target_obj['y'],
                 target_obj['mag']
@@ -479,7 +480,7 @@ def subtract_image(filename, config, verbose=True, show=False):
 
             # Create the cutout from image based on the candidate
             cutout = cutouts.get_cutout(
-                image1, target_obj[0], config.get('cutout_size', 30),
+                image1, target_obj[0], config_get(config, 'cutout_size'),
                 mask=fullmask1,
                 header=header1,
                 time=time,
@@ -512,12 +513,12 @@ def subtract_image(filename, config, verbose=True, show=False):
                 mask=fullmask1,
                 err=ediff,
                 wcs=wcs1, edge=sub_overlap,
-                aper=config.get('initial_aper', 3.0),
-                gain=config.get('gain', 1.0),
-                sn=config.get('sn', 5.0),
-                minarea=config.get('minarea', 3),
+                aper=config_get(config, 'initial_aper'),
+                gain=config_get(config, 'gain'),
+                sn=config_get(config, 'sn'),
+                minarea=config_get(config, 'minarea'),
                 extra_params=['NUMBER', 'MAG_AUTO', 'ISOAREA_IMAGE', 'FLUX_MAX', 'FLUX_AUTO'],
-                extra={'BACK_SIZE': config.get('bg_size', 256)},
+                extra={'BACK_SIZE': config_get(config, 'bg_size')},
                 checkimages=['SEGMENTATION'],
                 verbose=sub_verbose,
                 _tmpdir=settings.STDPIPE_TMPDIR,
@@ -527,16 +528,16 @@ def subtract_image(filename, config, verbose=True, show=False):
             sobj = photometry.measure_objects(
                 sobj, diff, mask=fullmask1,
                 # FWHM should match the one used for calibration
-                fwhm=config.get('fwhm'),
-                aper=config.get('rel_aper', 1.0),
+                fwhm=config_get(config, 'fwhm'),
+                aper=config_get(config, 'rel_aper'),
                 bkgann=rel_bkgann,
-                optimal=config.get('optimal_extraction', False),
-                sn=config.get('sn', 5.0),
+                optimal=config_get(config, 'optimal_extraction'),
+                sn=config_get(config, 'sn'),
                 # We assume no background
                 bg=None,
                 # ..and known error model
                 err=ediff,
-                gain=config.get('gain', 1.0),
+                gain=config_get(config, 'gain'),
                 verbose=sub_verbose
             )
 
@@ -557,7 +558,7 @@ def subtract_image(filename, config, verbose=True, show=False):
                 )
 
                 # TODO: Improve limiting mag estimate
-                sobj['mag_limit'] = -2.5*np.log10(config.get('sn', 5)*sobj['fluxerr']) + m['zero_fn'](
+                sobj['mag_limit'] = -2.5*np.log10(config_get(config, 'sn')*sobj['fluxerr']) + m['zero_fn'](
                     sobj['x'],
                     sobj['y'],
                     sobj['mag']
@@ -579,7 +580,7 @@ def subtract_image(filename, config, verbose=True, show=False):
                 log(f"{len(sobj)} candidates inside the region")
 
             # Pre-filter detections if requested
-            if config.get('filter_prefilter', True) and len(sobj):
+            if config_get(config, 'filter_prefilter') and len(sobj):
                 if classifier is None:
                     # Prepare the classifier based on SExtractor shape parameters
                     classifier = artefacts.filter_sextractor_detections(obj, verbose=False, return_classifier=True)
@@ -588,19 +589,19 @@ def subtract_image(filename, config, verbose=True, show=False):
                 sobj = sobj[fidx]
                 log(f"{len(sobj)} candidates left after pre-filtering")
 
-            vizier = ['gaiaedr3', 'ps1', 'skymapper', ] if config.get('filter_vizier') else []
+            vizier = ['gaiaedr3', 'ps1', 'skymapper', ] if config_get(config, 'filter_vizier') else []
 
             # Filter out catalogue objects
             candidates = pipeline.filter_transient_candidates(
                 sobj,
                 cat=None, # cat,
-                sr=0.5*pixscale*config.get('fwhm', 1.0),
+                sr=0.5*pixscale*config_get(config, 'fwhm'),
                 pixscale=pixscale,
                 vizier=vizier,
                 # Filter out any flags except for 0x100 which is isophotal masked
                 flagged=True, flagmask=0x7e00,
                 time=time,
-                skybot=config.get('filter_skybot', False),
+                skybot=config_get(config, 'filter_skybot'),
                 verbose=verbose
             )
 
@@ -608,9 +609,9 @@ def subtract_image(filename, config, verbose=True, show=False):
 
             os.makedirs(os.path.join(basepath, 'candidates'), exist_ok=True)
 
-            cutout_size = config.get('cutout_size', 30)
-            do_adjust = config.get('filter_adjust', True)
-            adjust_inner = int(np.ceil(2.0*config.get('fwhm'))) if do_adjust else None
+            cutout_size = config_get(config, 'cutout_size')
+            do_adjust = config_get(config, 'filter_adjust')
+            adjust_inner = int(np.ceil(2.0*config_get(config, 'fwhm'))) if do_adjust else None
 
             def process_sub_candidate(cand):
                 cutout = cutouts.get_cutout(
@@ -669,7 +670,7 @@ def subtract_image(filename, config, verbose=True, show=False):
             write_ds9_regions(
                 os.path.join(basepath, 'candidates.reg'),
                 candidates,
-                radius=config.get('rel_aper', 1.0)*pixscale*config.get('fwhm')
+                radius=config_get(config, 'rel_aper')*pixscale*config_get(config, 'fwhm')
             )
             log("Candidates written to file:candidates.reg as DS9 regions")
 

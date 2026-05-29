@@ -15,6 +15,7 @@ from astropy.time import Time
 
 from stdpipe import astrometry, photometry, catalogs, cutouts
 from stdpipe import templates, plots, pipeline, artefacts
+from stdweb.models import config_get
 
 from .constants import *
 from .utils import *
@@ -42,11 +43,11 @@ def photometry_image(filename, config, verbose=True, show=False):
         custom_mask = None
 
     # Time
-    time = Time(config.get('time')) if config.get('time') else None
+    time = Time(config_get(config, 'time')) if config_get(config, 'time') else None
 
     # Secondary targets - backward compatibility
     if not 'targets' in config and 'target_ra' in config and 'target_dec' in config:
-        config['targets'] = [{'ra': config.get('target_ra'), 'dec': config.get('target_dec')}]
+        config['targets'] = [{'ra': config_get(config, 'target_ra'), 'dec': config_get(config, 'target_dec')}]
 
     # Cleanup stale plots
     cleanup_paths(cleanup_photometry, basepath=basepath)
@@ -64,16 +65,16 @@ def photometry_image(filename, config, verbose=True, show=False):
     # Extract objects and get segmentation map
     obj,segm,fimg,bg,bgrms = photometry.get_objects_sextractor(
         image_masked, mask=mask,
-        aper=config.get('initial_aper', 3.0),
-        gain=config.get('gain', 1.0),
+        aper=config_get(config, 'initial_aper'),
+        gain=config_get(config, 'gain'),
         extra={
-            'BACK_SIZE': config.get('bg_size', 256),
-            'SATUR_LEVEL': config.get('saturation')
+            'BACK_SIZE': config_get(config, 'bg_size'),
+            'SATUR_LEVEL': config_get(config, 'saturation')
         },
         extra_params=['NUMBER', 'MAG_AUTO', 'ISOAREA_IMAGE', 'FLUX_MAX', 'FLUX_AUTO'],
         checkimages=['SEGMENTATION', 'FILTERED', 'BACKGROUND', 'BACKGROUND_RMS'],
-        minarea=config.get('minarea', 3),
-        r0=config.get('initial_r0', 0.0),
+        minarea=config_get(config, 'minarea'),
+        r0=config_get(config, 'initial_r0'),
         verbose=verbose,
         _tmpdir=settings.STDPIPE_TMPDIR,
         _exe=settings.STDPIPE_SEXTRACTOR
@@ -82,7 +83,7 @@ def photometry_image(filename, config, verbose=True, show=False):
     # FIXME: Filter some problematic detections
     obj = obj[obj['MAG_AUTO'] < 90]
     obj = obj[obj['fwhm'] > 0]
-    obj = obj[obj['ISOAREA_IMAGE'] > config.get('minarea', 3)]
+    obj = obj[obj['ISOAREA_IMAGE'] > config_get(config, 'minarea')]
 
     # Ignore "deblended" flag from SExtractor, for now
     # obj['flags'] &= 0xfffd
@@ -95,7 +96,7 @@ def photometry_image(filename, config, verbose=True, show=False):
     fits_write(os.path.join(basepath, 'filtered.fits'), fimg, header, compress=True)
     log("Filtered image written to file:filtered.fits")
 
-    if config.get('inspect_bg'):
+    if config_get(config, 'inspect_bg'):
         fits_write(os.path.join(basepath, 'image_bg.fits'), bg, header, compress=True)
         log("Background map written to file:image_bg.fits")
 
@@ -111,7 +112,7 @@ def photometry_image(filename, config, verbose=True, show=False):
     idx = obj['flags'] == 0
     idx &= obj['magerr'] < 1/20
 
-    if config.get('prefilter_detections', True):
+    if config_get(config, 'prefilter_detections'):
         log("Pre-filtering SExtractor detections with simple shape classifier")
         fidx = artefacts.filter_sextractor_detections(obj, verbose=verbose)
         idx &= fidx
@@ -126,8 +127,8 @@ def photometry_image(filename, config, verbose=True, show=False):
     fwhm = np.median(fwhm_values[idx]) # TODO: make it position-dependent
     log(f"FWHM is {fwhm:.2f} pixels")
 
-    if config.get('fwhm_override'):
-        fwhm = config.get('fwhm_override')
+    if config_get(config, 'fwhm_override'):
+        fwhm = config_get(config, 'fwhm_override')
         log(f"Overriding with user-specified FWHM value of {fwhm:.2f} pixels")
 
     config['fwhm'] = fwhm
@@ -165,7 +166,7 @@ def photometry_image(filename, config, verbose=True, show=False):
     log(f"FWHM diagnostic plot stored to file:fwhm_mag.png")
 
     # Plot pre-filtering diagnostics
-    if config.get('prefilter_detections', True):
+    if config_get(config, 'prefilter_detections'):
         with plots.figure_saver(os.path.join(basepath, 'prefilter.png'), figsize=(8, 8), show=show, tight_layout=False) as fig:
             features = artefacts.filter_sextractor_detections(obj, return_features=True)
 
@@ -197,7 +198,7 @@ def photometry_image(filename, config, verbose=True, show=False):
 
         log("Pre-filtering diagnostic plot stored to file:prefilter.png")
 
-    if config.get('rel_bg1') and config.get('rel_bg2'):
+    if config_get(config, 'rel_bg1') and config_get(config, 'rel_bg2'):
         rel_bkgann = [config['rel_bg1'], config['rel_bg2']]
     else:
         rel_bkgann = None
@@ -205,12 +206,12 @@ def photometry_image(filename, config, verbose=True, show=False):
     # Forced photometry at objects positions
     obj = photometry.measure_objects(obj, image, mask=mask,
                                      fwhm=fwhm,
-                                     aper=config.get('rel_aper', 1.0),
+                                     aper=config_get(config, 'rel_aper'),
                                      bkgann=rel_bkgann,
-                                     optimal=config.get('optimal_extraction', False),
-                                     sn=config.get('sn', 5.0),
-                                     bg_size=config.get('bg_size', 256),
-                                     gain=config.get('gain', 1.0),
+                                     optimal=config_get(config, 'optimal_extraction'),
+                                     sn=config_get(config, 'sn'),
+                                     bg_size=config_get(config, 'bg_size'),
+                                     gain=config_get(config, 'gain'),
                                      verbose=verbose)
 
     log(f"{len(obj)} objects properly measured, {np.sum(obj['flags'] == 0)} unflagged")
@@ -250,9 +251,9 @@ def photometry_image(filename, config, verbose=True, show=False):
         if np.sum(sn_vals >= sn0) < 10:
             raise RuntimeError('Too few good objects for blind matching')
 
-        if config.get('blind_match_center'):
+        if config_get(config, 'blind_match_center'):
             from stdpipe import resolve
-            center = resolve.resolve(config.get('blind_match_center'))
+            center = resolve.resolve(config_get(config, 'blind_match_center'))
             center_ra = center.ra.deg
             center_dec = center.dec.deg
         else:
@@ -267,9 +268,9 @@ def photometry_image(filename, config, verbose=True, show=False):
             obj_bm,
             center_ra=center_ra,
             center_dec=center_dec,
-            radius=config.get('blind_match_sr0'),
-            scale_lower=config.get('blind_match_ps_lo'),
-            scale_upper=config.get('blind_match_ps_up'),
+            radius=config_get(config, 'blind_match_sr0'),
+            scale_lower=config_get(config, 'blind_match_ps_lo'),
+            scale_upper=config_get(config, 'blind_match_ps_up'),
             sn=sn0,
             verbose=verbose,
             _tmpdir=settings.STDPIPE_TMPDIR,
@@ -303,11 +304,11 @@ def photometry_image(filename, config, verbose=True, show=False):
 
     log(f"Field center is at {ra0:.3f} {dec0:.3f}, radius {sr0:.2f} deg, scale {3600*pixscale:.2f} arcsec/pix")
 
-    if config.get('cat_name') not in supported_catalogs:
+    if config_get(config, 'cat_name') not in supported_catalogs:
         raise RuntimeError("Unsupported or not specified catalogue")
 
     filters = {}
-    if supported_catalogs[config['cat_name']].get('limit') and config.get('cat_limit'):
+    if supported_catalogs[config['cat_name']].get('limit') and config_get(config, 'cat_limit'):
         filters[supported_catalogs[config['cat_name']].get('limit')] = f"<{config['cat_limit']}"
 
     # Round the coordinates a bit to optimize consecutive calls to Vizier after WCS refinement
@@ -322,7 +323,7 @@ def photometry_image(filename, config, verbose=True, show=False):
     cat.write(os.path.join(basepath, 'cat.parquet'), overwrite=True)
     log("Catalogue written to file:cat.parquet")
 
-    if config.get('filter_blends', True):
+    if config_get(config, 'filter_blends'):
         # TODO: merge blended stars, not remove them!
         cat_filtered = filter_catalogue_blends(cat, 2*fwhm*pixscale)
         log(f"{len(cat_filtered)} catalogue stars after blend filtering with {3600*fwhm*pixscale:.1f} arcsec radius")
@@ -351,18 +352,18 @@ def photometry_image(filename, config, verbose=True, show=False):
         config['cat_col_color_mag1'] = 'BPmag'
         config['cat_col_color_mag2'] = 'RPmag'
     else:
-        raise RuntimeError(f"Cannot guess magnitude columns for {config.get('cat_name')} and filter {config.get('filter')}")
+        raise RuntimeError(f"Cannot guess magnitude columns for {config_get(config, 'cat_name')} and filter {config_get(config, 'filter')}")
 
     log(f"Will use catalogue column {config['cat_col_mag']} as primary magnitude ")
     log(f"Will use catalogue columns {config['cat_col_color_mag1']} and {config['cat_col_color_mag2']} for color")
 
     if not (config['cat_col_mag'] in cat.colnames and
-            (not config.get('cat_col_color_mag1') or config['cat_col_color_mag1'] in cat.colnames) and
-            (not config.get('cat_col_color_mag2') or config['cat_col_color_mag2'] in cat.colnames)):
+            (not config_get(config, 'cat_col_color_mag1') or config['cat_col_color_mag1'] in cat.colnames) and
+            (not config_get(config, 'cat_col_color_mag2') or config['cat_col_color_mag2'] in cat.colnames)):
         raise RuntimeError('Catalogue does not have required magnitudes')
 
     # Astrometric refinement
-    if config.get('refine_wcs', False):
+    if config_get(config, 'refine_wcs'):
         log("\n---- Astrometric refinement ----\n")
 
         # Exclude pre-filtered detections and limit list size
@@ -370,9 +371,9 @@ def photometry_image(filename, config, verbose=True, show=False):
 
         # FIXME: make the order configurable
         wcs1 = pipeline.refine_astrometry(obj_ast, cat_filtered, fwhm*pixscale,
-                                          wcs=wcs, order=config.get('refine_order', 3), method='scamp',
-                                          cat_col_mag=config.get('cat_col_mag'),
-                                          cat_col_mag_err=config.get('cat_col_mag_err'),
+                                          wcs=wcs, order=config_get(config, 'refine_order'), method='scamp',
+                                          cat_col_mag=config_get(config, 'cat_col_mag'),
+                                          cat_col_mag_err=config_get(config, 'cat_col_mag_err'),
                                           verbose=verbose,
                                           _tmpdir=settings.STDPIPE_TMPDIR,
                                           _exe=settings.STDPIPE_SCAMP)
@@ -392,22 +393,22 @@ def photometry_image(filename, config, verbose=True, show=False):
 
     log("\n---- Photometric calibration ----\n")
 
-    sr = config.get('sr_override')
+    sr = config_get(config, 'sr_override')
     if sr:
         sr /= 3600 # Arcseconds to degrees
 
     # Photometric calibration
     m = pipeline.calibrate_photometry(
         obj, cat_filtered, sr=sr, pixscale=pixscale,
-        cat_col_mag=config.get('cat_col_mag'),
-        cat_col_mag_err=config.get('cat_col_mag_err'),
-        cat_col_mag1=config.get('cat_col_color_mag1'),
-        cat_col_mag2=config.get('cat_col_color_mag2'),
-        use_color=config.get('use_color', True),
-        force_color_term=config.get('force_color_term'),
-        order=config.get('spatial_order', 0),
-        bg_order=config.get('bg_order', None),
-        nonlin=config.get('nonlin', False),
+        cat_col_mag=config_get(config, 'cat_col_mag'),
+        cat_col_mag_err=config_get(config, 'cat_col_mag_err'),
+        cat_col_mag1=config_get(config, 'cat_col_color_mag1'),
+        cat_col_mag2=config_get(config, 'cat_col_color_mag2'),
+        use_color=config_get(config, 'use_color'),
+        force_color_term=config_get(config, 'force_color_term'),
+        order=config_get(config, 'spatial_order'),
+        bg_order=config_get(config, 'bg_order'),
+        nonlin=config_get(config, 'nonlin'),
         robust=True, scale_noise=True,
         accept_flags=0x02, max_intrinsic_rms=0.01,
         verbose=verbose
@@ -507,8 +508,8 @@ def photometry_image(filename, config, verbose=True, show=False):
     log("Measured objects stored to file:objects.parquet")
 
     # Check the filter
-    if (config.get('use_color', True) and np.any(np.abs(m['color_term']) > 0.5)) or config.get('diagnose_color'):
-        if config.get('diagnose_color'):
+    if (config_get(config, 'use_color') and np.any(np.abs(m['color_term']) > 0.5)) or config_get(config, 'diagnose_color'):
+        if config_get(config, 'diagnose_color'):
             log("Running color term diagnostics for all possible filters")
         else:
             log("Warning: color term is too large, checking whether other filters would work better")
@@ -518,10 +519,10 @@ def photometry_image(filename, config, verbose=True, show=False):
                 obj, cat, pixscale=pixscale,
                 cat_col_mag=fname + 'mag',
                 cat_col_mag_err='e_' + fname + 'mag',
-                cat_col_mag1=config.get('cat_col_color_mag1'),
-                cat_col_mag2=config.get('cat_col_color_mag2'),
+                cat_col_mag1=config_get(config, 'cat_col_color_mag1'),
+                cat_col_mag2=config_get(config, 'cat_col_color_mag2'),
                 use_color=True,
-                order=config.get('spatial_order', 0),
+                order=config_get(config, 'spatial_order'),
                 robust=True, scale_noise=True,
                 accept_flags=0x02, max_intrinsic_rms=0.01,
                 verbose=False)
@@ -534,19 +535,19 @@ def photometry_image(filename, config, verbose=True, show=False):
     # Detection limits
     log("\n---- Global detection limit ----\n")
     sns = [10, 5, 3]
-    if config.get('sn', 5) not in sns:
-        sns.append(config.get('sn', 5))
+    if config_get(config, 'sn') not in sns:
+        sns.append(config_get(config, 'sn'))
     for sn in sns:
         # Just print the value
         mag0 = pipeline.get_detection_limit(obj, sn=sn, verbose=False)
         log(f"Detection limit at S/N={sn:.0f} level is {mag0:.2f}")
 
-    mag0 = pipeline.get_detection_limit(obj, sn=config.get('sn'), verbose=False)
+    mag0 = pipeline.get_detection_limit(obj, sn=config_get(config, 'sn'), verbose=False)
     config['mag_limit'] = mag0
 
     if 'bg_fluxerr' in obj.colnames and np.any(obj['bg_fluxerr'] > 0):
         fluxerr = obj['bg_fluxerr']
-        sn = config.get('sn', 5)
+        sn = config_get(config, 'sn')
         maglim = -2.5*np.log10(sn*fluxerr) + m['zero_fn'](obj['x'], obj['y'], obj['mag'])
         maglim = maglim[np.isfinite(maglim)] # Remove Inf and NaN
         log(f"Local background RMS detection limit (S/N={sn:.0f}) is {np.nanmedian(maglim):.2f} +/- {np.nanstd(maglim):.2f}")
@@ -557,14 +558,14 @@ def photometry_image(filename, config, verbose=True, show=False):
         # Filter out catalogue stars outside the image
         cx,cy = wcs.all_world2pix(cat['RAJ2000'], cat['DEJ2000'], 0)
         cat_idx = (cx > 0) & (cy > 0) & (cx < image.shape[1]) & (cy < image.shape[0])
-        plots.plot_mag_histogram(obj, cat[cat_idx], cat_col_mag=config['cat_col_mag'], sn=config.get('sn'), ax=ax)
+        plots.plot_mag_histogram(obj, cat[cat_idx], cat_col_mag=config['cat_col_mag'], sn=config_get(config, 'sn'), ax=ax)
 
     with plots.figure_saver(os.path.join(basepath, 'limit_sn.png'), figsize=(8, 6), show=show) as fig:
         ax = fig.add_subplot(1, 1, 1)
-        plots.plot_detection_limit(obj, mag_name=config['cat_col_mag'], sn=config.get('sn', 3), ax=ax)
+        plots.plot_detection_limit(obj, mag_name=config['cat_col_mag'], sn=config_get(config, 'sn'), ax=ax)
 
     # Target forced photometry
-    if config.get('targets'):
+    if config_get(config, 'targets'):
         log("\n---- Primary and secondary targets forced photometry ----\n")
 
         target_obj = Table({
@@ -584,13 +585,13 @@ def photometry_image(filename, config, verbose=True, show=False):
 
         target_obj = photometry.measure_objects(target_obj, image, mask=mask,
                                                 fwhm=fwhm,
-                                                aper=config.get('rel_aper', 1.0),
+                                                aper=config_get(config, 'rel_aper'),
                                                 bkgann=rel_bkgann,
-                                                optimal=config.get('optimal_extraction', False),
+                                                optimal=config_get(config, 'optimal_extraction'),
                                                 sn=0,
-                                                bg_size=config.get('bg_size', 256),
-                                                gain=config.get('gain', 1.0),
-                                                centroid_iter=5 if config.get('centroid_targets') else 0,
+                                                bg_size=config_get(config, 'bg_size'),
+                                                gain=config_get(config, 'gain'),
+                                                centroid_iter=5 if config_get(config, 'centroid_targets') else 0,
                                                 verbose=verbose)
 
         target_obj['mag_calib'] = target_obj['mag'] + m['zero_fn'](target_obj['x'],
@@ -603,7 +604,7 @@ def photometry_image(filename, config, verbose=True, show=False):
                                                             target_obj['mag'],
                                                             get_err=True))
 
-        if config.get('centroid_targets'):
+        if config_get(config, 'centroid_targets'):
             # Centroiding might change target pixel positions - let's update sky positions too
             target_obj['ra_orig'],target_obj['dec_orig'] = target_obj['ra'],target_obj['dec']
             target_obj['ra'],target_obj['dec'] = wcs.all_pix2world(target_obj['x'], target_obj['y'], 0)
@@ -613,7 +614,7 @@ def photometry_image(filename, config, verbose=True, show=False):
             fluxerr = target_obj['bg_fluxerr']
         else:
             fluxerr = target_obj['fluxerr']
-        target_obj['mag_limit'] = -2.5*np.log10(config.get('sn', 5)*fluxerr) + m['zero_fn'](target_obj['x'], target_obj['y'], target_obj['mag'])
+        target_obj['mag_limit'] = -2.5*np.log10(config_get(config, 'sn')*fluxerr) + m['zero_fn'](target_obj['x'], target_obj['y'], target_obj['mag'])
 
         target_obj['mag_filter_name'] = m['cat_col_mag']
 
@@ -636,11 +637,11 @@ def photometry_image(filename, config, verbose=True, show=False):
                 continue
 
             cutout = cutouts.get_cutout(
-                image, tobj, config.get('cutout_size', 30),
+                image, tobj, config_get(config, 'cutout_size'),
                 mask=mask,
                 header=header,
                 time=time,
-                # filtered=fimg if config.get('initial_r0') else None,
+                # filtered=fimg if config_get(config, 'initial_r0') else None,
             )
             # Cutout from relevant HiPS survey
             cutout['template'] = templates.get_hips_image(
@@ -676,7 +677,7 @@ def candidates_extract_unstacked(filename, candidates, config, verbose=True, sho
 
     basepath = os.path.dirname(filename)
 
-    if not config.get('stack_filenames'):
+    if not config_get(config, 'stack_filenames'):
         return
 
     log('Augmenting candidates with cutouts from original unstacked images')
@@ -696,7 +697,7 @@ def candidates_extract_unstacked(filename, candidates, config, verbose=True, sho
 
                 sx0,sy0 = swcs.all_world2pix(cand['ra'], cand['dec'], 0)
 
-                cut = cutouts.crop_image_centered(simage, sx0, sy0, config.get('cutout_size', 30))
+                cut = cutouts.crop_image_centered(simage, sx0, sy0, config_get(config, 'cutout_size'))
                 stack_cutouts[cid].append(cut)
 
     unstack_names = []

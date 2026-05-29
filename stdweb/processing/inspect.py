@@ -318,7 +318,7 @@ def inspect_image(filename, config, verbose=True, show=False):
         else:
             config['cat_name'] = 'ps1'
 
-            if (dec0 is not None and dec0 < -30) or config.get('target_dec', 0) < -30:
+            if (dec0 is not None and dec0 < -30) or (config.get('target_dec') or 0) < -30:
                 config['cat_name'] = 'skymapper'
 
         log(f"Suggested catalogue is {supported_catalogs[config['cat_name']]['name']}")
@@ -336,7 +336,7 @@ def inspect_image(filename, config, verbose=True, show=False):
         elif ((dec0 is not None and templates.point_in_ls(ra0, dec0)) or
             (config.get('target_dec') and templates.point_in_ls(config.get('target_ra'), config.get('target_dec')))):
             config['template'] = 'ls'
-        elif (dec0 is not None and dec0 < -30) or config.get('target_dec', 0) < -30:
+        elif (dec0 is not None and dec0 < -30) or (config.get('target_dec') or 0) < -30:
             config['template'] = 'skymapper'
         else:
             config['template'] = 'ps1' # Fallback

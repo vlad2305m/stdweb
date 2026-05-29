@@ -9,6 +9,160 @@ import os, shutil
 import datetime
 
 
+def config_get(config, key):
+    if config is not None and key in config:
+        return config[key]
+    # Defaults are kept as a separate object to not pollute the database - is this a good thing?
+    _default_config = {
+        # (TaskInspectForm) Time string for processing (ISO or similar)
+        "time": None,
+
+        # (UploadFileForm / TaskPhotometryForm) Targets to measure; list of {ra,dec}
+        "targets": None,
+        "target_ra": None,
+        "target_dec": None,
+
+        # (TaskPhotometryForm) Initial aperture (pixels)
+        "initial_aper": 3.0,
+        # (TaskPhotometryForm) Initial smoothing kernel (pixels)
+        "initial_r0": 0.0,
+        # (TaskPhotometryForm / subtraction) Background mesh size (pixels, width and height)
+        "bg_size": 256,
+        # (TaskInspectForm / TaskPhotometryForm) Saturation level (ADU)
+        "saturation": None,
+        # (TaskPhotometryForm) Minimal object area for detection (pixels)
+        "minarea": 3,
+
+        # (Photometry/Subtraction) Relative aperture for forced photometry (FWHM units)
+        "rel_aper": 1.0,
+        "rel_bg1": 5,
+        "rel_bg2": 7,
+
+        # (TaskPhotometryForm) Optional override of measured FWHM (pixels)
+        "fwhm_override": None,
+        # (set by photometry) Measured FWHM (pixels)
+        "fwhm": 1.0, # 3 or 1?
+
+        # (TaskPhotometryForm) Filter name used for calibration
+        "filter": "",
+        # (TaskPhotometryForm) Reference catalogue name
+        "cat_name": "",
+        "cat_limit": None,
+        "cat_col_mag": None,
+        "cat_col_mag_err": None,
+        "cat_col_color_mag1": None,
+        "cat_col_color_mag2": None,
+
+        # (TaskPhotometryForm) Zeropoint spatial order and color usage
+        "spatial_order": 0,
+        "use_color": False, # True ?
+        # (TaskPhotometryForm) Force a color-term fit during calibration
+        "force_color_term": False,
+        # (TaskPhotometryForm) Background polynomial order for calibration
+        "bg_order": None,
+
+        # (TaskPhotometryForm) Matching radius override (arcsec)
+        "sr_override": None,
+
+        # (TaskPhotometryForm) Pre-filter detections using artefact classifier
+        "prefilter_detections": True,
+        # (TaskPhotometryForm) Remove blended catalogue stars
+        "filter_blends": True,
+        # (TaskPhotometryForm) Diagnostic flag for color term
+        "diagnose_color": False,
+
+        # (TaskPhotometryForm) Astrometry refinement flags and options
+        "refine_wcs": False, # True?
+        "refine_order": 3,
+        "blind_match_wcs": False,
+        "inspect_bg": False,
+        "centroid_targets": False,
+        "optimal_extraction": False,
+        "nonlin": False,
+
+        # (TaskPhotometryForm) Blind-match scale and center parameters
+        "blind_match_ps_lo": 0.2,
+        "blind_match_ps_up": 4.0,
+        "blind_match_center": None,
+        "blind_match_sr0": 2,
+
+        # (Inspect) default S/N threshold used in various plots and checks
+        "sn": 5, # was 3 in plotdetectionlimit
+
+        # (Inspect) image gain; usually inferred from FITS header if unset
+        "gain": 1.0,
+        # (Celery tasks) enable timing markers in log files
+        "timing": None,
+
+        # (TaskInspectForm / UploadFileForm) Control running stages
+        "run_subtraction": False,
+        "run_photometry": False,
+
+        # (TaskTransientsSimpleForm) Simple-transients options
+        "simple_skybot": True,
+        "simple_others": None,
+        "simple_center": None,
+        "simple_sr0": None,
+        "simple_blends": True,
+        "simple_prefilter": True,
+        "simple_mag_diff": 2.0,
+
+        # (transients) Cutout size in pixels used when extracting candidates
+        "cutout_size": 30,
+
+        # (Views / UploadFileForm) Stack input filenames when stacking multiple images
+        "stack_filenames": None,
+
+        # (Views) Free-form target string (one per line) commonly set from forms
+        "target": None,
+
+        # (Processing) Pixel scale updated after WCS is available
+        "pixscale": None,
+
+        # (Processing / views_skyportal) Photometry-derived magnitude limit
+        "mag_limit": None,
+
+        # (SubtractionForm) Template selection and custom template parameters
+        "template": "ps1",
+        "custom_template_gain": 10000,
+        "custom_template_saturation": None,
+        "template_fwhm_override": None,
+
+        # (SubtractionForm) Subtraction control
+        "sub_size": 1000,
+        "sub_overlap": 50,
+        "sub_verbose": False,
+        "subtraction_method": "hotpants",
+        "subtraction_mode": "detection",
+
+        # (SubtractionForm) HOTPANTS / SFFT parameters
+        "hotpants_extra": {"ko": 0, "bgo": 0},
+        "sfft_kernel_poly_order": 0,
+        "sfft_bg_poly_order": 0,
+        "sfft_flux_poly_order": 0,
+
+        # (SubtractionForm) Filters for transient search within subtraction
+        "filter_vizier": False,
+        "filter_skybot": False,
+        "filter_prefilter": True,
+        "filter_adjust": True,
+        "filter_center": None,
+        "filter_sr0": 1,
+
+        # (Stacking / UploadFileForm) Stacking behavior
+        "stack_method": "sum",
+        "stack_subtract_bg": True,
+        "stack_mask_cosmics": False,
+
+        # (Inspect/Upload) Mask cosmics while inspecting/stacking
+        "mask_cosmics": True,
+
+        # Accessed in crispy fields template apparently because this is initial for all forms
+        "form_type": None,
+    }
+
+    return _default_config[key]
+
 class Task(models.Model):
     # path = models.CharField(max_length=250, blank=False, unique=True, editable=False) # Base dir where task processing will be performed
     original_name = models.CharField(max_length=250, blank=False) # Original filename
@@ -32,7 +186,7 @@ class Task(models.Model):
     radius = models.FloatField(blank=True, null=True)
     moc = models.TextField(blank=True, null=True)
 
-    config = models.JSONField(default=dict, blank=True) #
+    config = models.JSONField(default=dict, blank=True)
 
     def path(self):
         return os.path.join(settings.TASKS_PATH, str(self.id))
