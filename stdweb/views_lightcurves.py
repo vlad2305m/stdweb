@@ -15,11 +15,39 @@ from astropy.table import Table, vstack
 from astropy.coordinates import SkyCoord
 
 from mocpy import MOC
+import requests
 
 from stdpipe import astrometry, resolve, photometry
+from stdweb import settings
 
 from . import models
 from . import forms
+
+
+def skyportal_resolve_id_to_coords(sid, api_token=settings.SKYPORTAL_TOKEN):
+    if api_token is not None:
+        headers = {'Authorization': f'token {api_token}'}
+    else:
+        headers = None
+
+    sid = sid.split("/")[-1].split("?")[0].split("#")[0] # Strip url from the id
+
+    base_url = 'https://skyportal-icare.ijclab.in2p3.fr/api'
+    res = requests.get(f'{base_url}/sources?sourceID={sid}&sortBy=id&sortOrder=desc&removeNested=true', headers=headers)
+
+    coords = []
+    if res:
+        json = res.json()
+        if json['status'] == 'success':
+            for s in json['data']['sources']:
+                if s['id'] == sid:
+                    return (s['ra'], s['dec'])  # Exact match
+                coords.append((s['ra'], s['dec']))
+
+    if len(coords) > 0:
+        return coords[0]  # Newest match
+    else:
+        return None  # No match
 
 
 def _find_matching_tasks(user, coordinates, extra, targets_only, show_all, radius_arcsec):
@@ -32,8 +60,15 @@ def _find_matching_tasks(user, coordinates, extra, targets_only, show_all, radiu
     Raises:
         ValueError: If coordinates cannot be resolved.
     """
+
     coords = resolve.resolve(coordinates)
-    ra0, dec0 = coords.ra.deg, coords.dec.deg
+    if coords:
+        ra0, dec0 = coords.ra.deg, coords.dec.deg
+    else:
+        coords = skyportal_resolve_id_to_coords(coordinates)
+        if not coords:
+            raise ValueError(f"Failed to resolve coordinates {coordinates}")
+        ra0, dec0 = coords
 
     # Get all tasks user can access
     tasks = models.Task.objects.all().order_by('-id')

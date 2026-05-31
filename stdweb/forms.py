@@ -473,7 +473,7 @@ class LightcurveSearchForm(forms.Form):
         max_length=200,
         required=True,
         label="Sky Position",
-        widget=forms.TextInput(attrs={'placeholder': 'Object name or coordinates'}),
+        widget=forms.TextInput(attrs={'placeholder': 'Object name, coordinates or SkyPortal id'}),
     )
     extra = forms.CharField(
         max_length=200,
@@ -482,6 +482,7 @@ class LightcurveSearchForm(forms.Form):
         widget=forms.TextInput(attrs={'placeholder': 'Filter by filename or title or username'}),
     )
     radius = forms.FloatField(min_value=0, initial=5, required=True, label="Search radius, arcsec")
+
     show_images = forms.BooleanField(initial=True, required=False, label="Show images")
     targets_only = forms.BooleanField(initial=True, required=False, label="Target photometry only")
     show_all = forms.BooleanField(initial=True, required=False, label="Tasks from all users")
