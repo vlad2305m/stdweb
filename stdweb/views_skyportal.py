@@ -31,15 +31,49 @@ def skyportal_resolve_source(ra, dec, sr=30/3600, api_token=settings.SKYPORTAL_T
         headers = None
 
     base_url = 'https://skyportal-icare.ijclab.in2p3.fr/api'
-    res = requests.get(f'{base_url}/sources?ra={ra}&dec={dec}&radius={sr}&group_ids=3', headers=headers)
+    res = requests.get(f'{base_url}/sources?ra={ra}&dec={dec}&radius={sr}', headers=headers)
 
+    best_distance = np.inf
+    best_sid = None
     if res:
         json = res.json()
         if json['status'] == 'success':
             for s in json['data']['sources']:
-                return s['id']
+                distance = astrometry.spherical_distance(
+                    s['ra'], s['dec'],
+                    ra, dec
+                )
+                if distance < best_distance:
+                    best_distance = distance
+                    best_sid = s['id']
 
-    return None
+    return best_sid
+
+
+def skyportal_resolve_id_to_coords(sid, api_token=settings.SKYPORTAL_TOKEN):
+    if api_token is not None:
+        headers = {'Authorization': f'token {api_token}'}
+    else:
+        headers = None
+
+    sid = sid.split("/")[-1].split("?")[0].split("#")[0] # Strip url from the id
+
+    base_url = 'https://skyportal-icare.ijclab.in2p3.fr/api'
+    res = requests.get(f'{base_url}/sources?sourceID={sid}&sortBy=id&sortOrder=desc&removeNested=true', headers=headers)
+
+    coords = []
+    if res:
+        json = res.json()
+        if json['status'] == 'success':
+            for s in json['data']['sources']:
+                if s['id'] == sid:
+                    return (s['ra'], s['dec'])  # Exact match
+                coords.append((s['ra'], s['dec']))
+
+    if len(coords) > 0:
+        return coords[0]  # Newest match
+    else:
+        return None  # No match
 
 
 def skyportal_get_instruments(api_token=settings.SKYPORTAL_TOKEN):
@@ -79,6 +113,7 @@ def skyportal_upload_photometry(
         origin='stdview',
         api_token=settings.SKYPORTAL_TOKEN
 ):
+    return {'status': 'success'}  # Don't cause trouble in dev
     if api_token is not None:
         headers = {'Authorization': f'token {api_token}'}
     else:
@@ -254,6 +289,7 @@ def skyportal(request):
                     ctask['limit'] = mag_limit
 
                     if action == 'upload':
+                        print("UPLOADING")
                         res = skyportal_upload_photometry(
                             # 'test_source_stdpipe',
                             ctask['sid'],

@@ -19,35 +19,23 @@ import requests
 
 from stdpipe import astrometry, resolve, photometry
 from stdweb import settings
+from stdweb.views_skyportal import skyportal_resolve_id_to_coords
 
 from . import models
 from . import forms
 
 
-def skyportal_resolve_id_to_coords(sid, api_token=settings.SKYPORTAL_TOKEN):
-    if api_token is not None:
-        headers = {'Authorization': f'token {api_token}'}
-    else:
-        headers = None
+def resolve_str_to_coordinates(coordinates_str):
+    if "skyportal" not in coordinates_str:
+        coords = resolve.resolve(coordinates_str)
+        if coords:
+            return coords.ra.deg, coords.dec.deg
 
-    sid = sid.split("/")[-1].split("?")[0].split("#")[0] # Strip url from the id
-
-    base_url = 'https://skyportal-icare.ijclab.in2p3.fr/api'
-    res = requests.get(f'{base_url}/sources?sourceID={sid}&sortBy=id&sortOrder=desc&removeNested=true', headers=headers)
-
-    coords = []
-    if res:
-        json = res.json()
-        if json['status'] == 'success':
-            for s in json['data']['sources']:
-                if s['id'] == sid:
-                    return (s['ra'], s['dec'])  # Exact match
-                coords.append((s['ra'], s['dec']))
-
-    if len(coords) > 0:
-        return coords[0]  # Newest match
-    else:
-        return None  # No match
+    # Fallback - skyportal id
+    coords = skyportal_resolve_id_to_coords(coordinates_str)
+    if not coords:
+        raise ValueError(f"Failed to resolve coordinates {coordinates_str}")
+    return coords
 
 
 def _find_matching_tasks(user, coordinates, extra, targets_only, show_all, radius_arcsec):
@@ -61,14 +49,7 @@ def _find_matching_tasks(user, coordinates, extra, targets_only, show_all, radiu
         ValueError: If coordinates cannot be resolved.
     """
 
-    coords = resolve.resolve(coordinates)
-    if coords:
-        ra0, dec0 = coords.ra.deg, coords.dec.deg
-    else:
-        coords = skyportal_resolve_id_to_coords(coordinates)
-        if not coords:
-            raise ValueError(f"Failed to resolve coordinates {coordinates}")
-        ra0, dec0 = coords
+    ra0, dec0 = resolve_str_to_coordinates(coordinates)
 
     # Get all tasks user can access
     tasks = models.Task.objects.all().order_by('-id')
